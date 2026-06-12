@@ -81,10 +81,14 @@ impl Resolver {
 }
 
 
-/// Looks up the system default nameserver on Unix, by querying
-/// `/etc/resolv.conf` and using the first line that specifies one.
-/// Falls back to `resolvectl` (systemd-resolved) if no nameserver is found,
-/// and finally to `1.1.1.1` as a last resort.
+/// Looks up the system default nameserver on Unix, using a multi-tier
+/// fallback strategy:
+///
+/// 1. `/etc/resolv.conf` (traditional)
+/// 2. `resolvectl dns` — link DNS first (physical iface), global DNS second
+/// 3. `/run/systemd/resolve/resolv.conf` (works without resolvectl binary)
+/// 4. `scutil --dns` (macOS)
+/// 5. `1.1.1.1` (last resort)
 #[cfg(unix)]
 fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
     if cfg!(test) {
@@ -93,16 +97,10 @@ fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
 
     let search_list = Vec::new();
 
-    // ── Step 1: /etc/resolv.conf ──────────────────────────────────
-
-    crate::verbose!("[dog] Looking up system DNS servers from /etc/resolv.conf...");
-
     let nameserver = read_resolv_conf().ok().and_then(|(ns, _sl)| {
         crate::verbose!("[dog]   Found nameserver in /etc/resolv.conf: {}", ns);
         Some(ns)
     });
-
-    // ── Step 2: systemd-resolved (resolvectl) ─────────────────────
 
     let nameserver = nameserver.or_else(|| {
         crate::verbose!("[dog] Trying resolvectl (systemd-resolved)...");
@@ -112,7 +110,24 @@ fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
         })
     });
 
-    // ── Step 3: Last resort ───────────────────────────────────────
+    let nameserver = nameserver.or_else(|| {
+        crate::verbose!("[dog] Trying /run/systemd/resolve/resolv.conf...");
+        read_resolv_conf_at("/run/systemd/resolve/resolv.conf")
+            .or_else(|_| read_resolv_conf_at("/run/systemd/resolve/stub-resolv.conf"))
+            .ok()
+            .map(|(ns, _sl)| {
+                crate::verbose!("[dog]   Found nameserver in systemd-resolve config: {}", ns);
+                ns
+            })
+    });
+
+    let nameserver = nameserver.or_else(|| {
+        crate::verbose!("[dog] Trying scutil --dns (macOS)...");
+        scutil_dns().map(|ns| {
+            crate::verbose!("[dog]   Found nameserver via scutil: {}", ns);
+            ns
+        })
+    });
 
     if let Some(ns) = nameserver {
         crate::verbose!("[dog] Resolved nameserver: {}", ns);
@@ -126,11 +141,17 @@ fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
 /// Reads the first nameserver from `/etc/resolv.conf`.
 #[cfg(unix)]
 fn read_resolv_conf() -> io::Result<(String, Vec<String>)> {
+    read_resolv_conf_at("/etc/resolv.conf")
+}
+
+/// Reads the first nameserver from a resolv.conf-style file at the given path.
+#[cfg(unix)]
+fn read_resolv_conf_at(path: &str) -> io::Result<(String, Vec<String>)> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
     use std::net::IpAddr;
 
-    let f = File::open("/etc/resolv.conf")?;
+    let f = File::open(path)?;
     let reader = BufReader::new(f);
 
     let mut search_list = Vec::new();
@@ -147,10 +168,11 @@ fn read_resolv_conf() -> io::Result<(String, Vec<String>)> {
         }
     }
 
-    Err(io::Error::new(io::ErrorKind::NotFound, "No nameserver in /etc/resolv.conf"))
+    Err(io::Error::new(io::ErrorKind::NotFound, format!("No nameserver in {}", path)))
 }
 
 /// Queries systemd-resolved for DNS servers via `resolvectl dns`.
+/// Returns the first physical link DNS if available, falling back to Global DNS.
 #[cfg(unix)]
 fn resolvectl_dns() -> Option<String> {
     use std::process::Command;
@@ -167,30 +189,58 @@ fn resolvectl_dns() -> Option<String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Parse lines like:
-    //   Global: 192.168.1.1
-    //   Link 2 (eth0): 192.168.1.1 fe80::1
+    let parse_addr = |s: &str| -> Option<String> {
+        let s = s.split('#').next().unwrap_or(s);
+        let s = s.split('%').next().unwrap_or(s);
+        s.parse::<IpAddr>().ok().map(|a| a.to_string())
+    };
+
+    let mut global_dns: Option<String> = None;
+
     for line in stdout.lines() {
         if let Some(colon_pos) = line.find(':') {
             let after = line[colon_pos + 1..].trim();
-            // The "Global:" entry is the most authoritative
-            if line.starts_with("Global:") && !after.is_empty() {
-                // Take the first IP from the space-separated list
-                return after.split_whitespace()
-                    .find_map(|s| s.parse::<IpAddr>().ok())
-                    .map(|a| a.to_string());
+            if after.is_empty() { continue; }
+            if line.starts_with("Global:") {
+                global_dns = after.split_whitespace().find_map(&parse_addr);
+            } else if line.starts_with("Link ") && !line.contains("(lo)") {
+                if let Some(addr) = after.split_whitespace().find_map(&parse_addr) {
+                    crate::verbose!("[dog]   resolvectl link DNS: {:?}", addr);
+                    return Some(addr);
+                }
             }
         }
     }
 
-    // Fallback: take first DNS from any link
+    crate::verbose!("[dog]   resolvectl falling back to global DNS: {:?}", global_dns);
+    global_dns
+}
+
+/// Queries macOS's `scutil --dns` for DNS servers.
+#[cfg(unix)]
+fn scutil_dns() -> Option<String> {
+    use std::process::Command;
+    use std::net::IpAddr;
+
+    let output = Command::new("scutil")
+        .args(["--dns"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
     for line in stdout.lines() {
-        if let Some(colon_pos) = line.find(':') {
-            let after = line[colon_pos + 1..].trim();
-            if !after.is_empty() {
-                return after.split_whitespace()
-                    .find_map(|s| s.parse::<IpAddr>().ok())
-                    .map(|a| a.to_string());
+        let trimmed = line.trim();
+        if let Some(after) = trimmed.strip_prefix("nameserver[") {
+            if let Some(colon_pos) = after.find("] : ") {
+                let addr_str = after[colon_pos + 4..].trim();
+                if let Ok(addr) = addr_str.parse::<IpAddr>() {
+                    return Some(addr.to_string());
+                }
             }
         }
     }
