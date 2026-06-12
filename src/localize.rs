@@ -303,7 +303,7 @@ static USAGE_EN: &str = r##"\4mUsage:\0m
 \4mMeta options:\0m
   \1;33m-?\0m, \1;33m--help\0m               Print list of command-line options
   \1;33m-v\0m, \1;33m--version\0m            Print version information
-  \1;33m--verbose\0m                 Print verbose diagnostic output
+  \1;33m--verbose\0m                Print verbose diagnostic output
 "##;
 
 /// The Chinese usage template.
