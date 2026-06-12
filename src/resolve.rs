@@ -87,10 +87,6 @@ impl Resolver {
 /// and finally to `1.1.1.1` as a last resort.
 #[cfg(unix)]
 fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
-    use std::fs::File;
-    use std::io::{BufRead, BufReader};
-    use std::net::IpAddr;
-
     if cfg!(test) {
         panic!("system_nameservers() called from test code");
     }
