@@ -1,6 +1,5 @@
-#![cfg_attr(not(feature = "tls"), allow(unused))]
+#![cfg_attr(not(feature = "with_tls"), allow(unused))]
 
-use std::net::TcpStream;
 use std::io::Write;
 
 use log::*;

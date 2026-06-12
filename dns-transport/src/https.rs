@@ -1,7 +1,6 @@
-#![cfg_attr(not(feature = "https"), allow(unused))]
+#![cfg_attr(not(feature = "with_https"), allow(unused))]
 
 use std::io::{Read, Write};
-use std::net::TcpStream;
 
 use log::*;
 

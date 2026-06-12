@@ -23,6 +23,19 @@
 
 use log::*;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static VERBOSE: AtomicBool = AtomicBool::new(false);
+
+#[macro_export]
+macro_rules! verbose {
+    ($($arg:tt)*) => {
+        if $crate::VERBOSE.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!($($arg)*);
+        }
+    };
+}
+
 mod colours;
 mod connect;
 mod hints;
@@ -53,6 +66,9 @@ fn main() {
     match Options::getopts(env::args_os().skip(1)) {
         OptionsResult::Ok(options) => {
             info!("Running with options -> {:#?}", options);
+            if options.verbose {
+                VERBOSE.store(true, Ordering::Relaxed);
+            }
             disabled_feature_check(&options);
             exit(run(options));
         }
@@ -98,7 +114,7 @@ fn main() {
 
 
 /// Runs dog with some options, returning the status to exit with.
-fn run(Options { requests, format, measure_time }: Options) -> i32 {
+fn run(Options { requests, format, measure_time, .. }: Options) -> i32 {
     use std::time::Instant;
 
     let should_show_opt = requests.edns.should_show();
@@ -123,9 +139,21 @@ fn run(Options { requests, format, measure_time }: Options) -> i32 {
     }
 
     let request_tuples = match requests.generate() {
-        Ok(rt) => rt,
+        Ok(rt) => {
+            verbose!("[dog] Generated {} request tuple(s)", rt.len());
+            for (_, req_list) in &rt {
+                for req in req_list {
+                    verbose!("[dog]   Querying {:?} for {:?} txid {} class {:?}",
+                        req.query.qname,
+                        req.query.qtype,
+                        req.transaction_id,
+                        req.query.qclass);
+                }
+            }
+            rt
+        }
         Err(e) => {
-            eprintln!("Unable to obtain resolver: {}", e);
+            eprintln!("[dog] Unable to obtain resolver: {}", e);
             return exits::SYSTEM_ERROR;
         }
     };
@@ -133,11 +161,15 @@ fn run(Options { requests, format, measure_time }: Options) -> i32 {
     for (transport, request_list) in request_tuples {
         let request_list_len = request_list.len();
         for (i, request) in request_list.into_iter().enumerate() {
+            verbose!("[dog] Sending request (attempt {}/{})...", i + 1, request_list_len);
             let result = transport.send(&request);
 
             match result {
                 Ok(mut response) => {
+                    verbose!("[dog] Received {} answer(s)", response.answers.len());
+
                     if response.flags.error_code.is_some() && i != request_list_len - 1 {
+                        verbose!("[dog] Error code in response, trying next...");
                         continue;
                     }
 
@@ -151,6 +183,7 @@ fn run(Options { requests, format, measure_time }: Options) -> i32 {
                     break;
                 }
                 Err(e) => {
+                    verbose!("[dog] Transport error (attempt {}/{}): {:?}", i + 1, request_list_len, e);
                     format.print_error(e);
                     errored = true;
                     break;
@@ -181,13 +214,13 @@ fn disabled_feature_check(options: &Options) {
     use std::process::exit;
     use crate::connect::TransportType;
 
-    #[cfg(all(not(feature = "with_tls"), not(feature = "with_rustls_tls")))]
+    #[cfg(not(feature = "with_tls"))]
     if options.requests.inputs.transport_types.contains(&TransportType::TLS) {
         eprintln!("dog: Cannot use '--tls': This version of dog has been compiled without TLS support");
         exit(exits::OPTIONS_ERROR);
     }
 
-    #[cfg(all(not(feature = "with_https"), not(feature = "with_rustls_https")))]
+    #[cfg(not(feature = "with_https"))]
     if options.requests.inputs.transport_types.contains(&TransportType::HTTPS) {
         eprintln!("dog: Cannot use '--https': This version of dog has been compiled without HTTPS support");
         exit(exits::OPTIONS_ERROR);

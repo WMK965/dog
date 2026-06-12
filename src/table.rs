@@ -123,7 +123,7 @@ impl Table {
             Record::HINFO(_)       => self.colours.hinfo.paint("HINFO"),
             Record::LOC(_)         => self.colours.loc.paint("LOC"),
             Record::MX(_)          => self.colours.mx.paint("MX"),
-            Record::NAPTR(_)       => self.colours.ns.paint("NAPTR"),
+            Record::NAPTR(_)       => self.colours.naptr.paint("NAPTR"),
             Record::NS(_)          => self.colours.ns.paint("NS"),
             Record::OPENPGPKEY(_)  => self.colours.openpgpkey.paint("OPENPGPKEY"),
             Record::PTR(_)         => self.colours.ptr.paint("PTR"),

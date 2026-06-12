@@ -83,7 +83,7 @@ impl Resolver {
 
 /// Looks up the system default nameserver on Unix, by querying
 /// `/etc/resolv.conf` and using the first line that specifies one.
-/// Returns an error if there’s a problem reading the file, or `None` if no
+/// Returns an error if there's a problem reading the file, or `None` if no
 /// nameserver is specified in the file.
 #[cfg(unix)]
 fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
@@ -130,7 +130,6 @@ fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
 /// Looks up the system default nameserver on Windows, by iterating through
 /// the list of network adapters and returning the first nameserver it finds.
 #[cfg(windows)]
-#[allow(unused)]  // todo: Remove this when the time is right
 fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
     use std::net::{IpAddr, UdpSocket};
 
@@ -138,69 +137,102 @@ fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
         panic!("system_nameservers() called from test code");
     }
 
-    // According to the specification, prefer ipv6 by default.
-    // TODO: add control flag to select an ip family.
-    #[derive(Debug, PartialEq)]
-    enum ForceIPFamily {
-        V4,
-        V6,
-        None,
-    }
+    crate::verbose!("[dog] Looking up system DNS servers...");
 
-    // get the IP of the Network adapter that is used to access the Internet
-    // https://stackoverflow.com/questions/24661022/getting-ip-adress-associated-to-real-hardware-ethernet-controller-in-windows-c
-    fn get_ipv4() -> io::Result<IpAddr> {
-        let s = UdpSocket::bind("0.0.0.0:0")?;
-        s.connect("8.8.8.8:53")?;
-        let addr = s.local_addr()?;
-        Ok(addr.ip())
-    }
+    let search_list = Vec::new();
 
-    fn get_ipv6() -> io::Result<IpAddr> {
-        let s = UdpSocket::bind("[::1]:0")?;
-        s.connect("[2001:4860:4860::8888]:53")?;
-        let addr = s.local_addr()?;
-        Ok(addr.ip())
-    }
-
-    let force_ip_family: ForceIPFamily = ForceIPFamily::None;
-    let ip = match force_ip_family {
-        ForceIPFamily::V4 => get_ipv4().ok(),
-        ForceIPFamily::V6 => get_ipv6().ok(),
-        ForceIPFamily::None => get_ipv6().or(get_ipv4()).ok(),
+    let adapters = match ipconfig::get_adapters() {
+        Ok(a) => {
+            crate::verbose!("[dog] Found {} network adapter(s)", a.len());
+            for ad in &a {
+                crate::verbose!("[dog]   Adapter: {} (up={}, gateways={:?}, ips={:?}, dns={:?})",
+                    ad.friendly_name(),
+                    ad.oper_status() == ipconfig::OperStatus::IfOperStatusUp,
+                    ad.gateways(),
+                    ad.ip_addresses(),
+                    ad.dns_servers());
+            }
+            a
+        }
+        Err(e) => {
+            eprintln!("[dog] Error reading adapters: {}", e);
+            return Err(ResolverLookupError::Windows(e));
+        }
     };
 
-    let search_list = Vec::new();  // todo: implement this
+    // First pass: find adapters with DNS servers and gateways
+    let active_adapters: Vec<_> = adapters.iter()
+        .filter(|a| a.oper_status() == ipconfig::OperStatus::IfOperStatusUp && !a.gateways().is_empty())
+        .collect();
 
-    let adapters = ipconfig::get_adapters()?;
-    let active_adapters = adapters.iter().filter(|a| {
-        a.oper_status() == ipconfig::OperStatus::IfOperStatusUp && !a.gateways().is_empty()
+    let nameserver = if !active_adapters.is_empty() {
+        fn get_primary_ip() -> Option<IpAddr> {
+            if let Ok(s) = UdpSocket::bind("0.0.0.0:0") {
+                if s.connect("8.8.8.8:53").is_ok() {
+                    if let Ok(addr) = s.local_addr() {
+                        crate::verbose!("[dog] Primary network IP: IPv4 {}", addr.ip());
+                        return Some(addr.ip());
+                    }
+                }
+            }
+            if let Ok(s) = UdpSocket::bind("[::]:0") {
+                if s.connect("[2001:4860:4860::8888]:53").is_ok() {
+                    if let Ok(addr) = s.local_addr() {
+                        crate::verbose!("[dog] Primary network IP: IPv6 {}", addr.ip());
+                        return Some(addr.ip());
+                    }
+                }
+            }
+            crate::verbose!("[dog] Could not determine primary network IP");
+            None
+        }
+
+        if let Some(primary_ip) = get_primary_ip() {
+            if let Some(dns) = active_adapters.iter()
+                .find(|a| a.ip_addresses().contains(&primary_ip))
+                .and_then(|a| a.dns_servers().first())
+            {
+                crate::verbose!("[dog] Matched primary adapter IP, using DNS: {}", dns);
+                Some(dns.to_string())
+            } else {
+                crate::verbose!("[dog] Primary IP {:?} did not match any adapter", primary_ip);
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        crate::verbose!("[dog] No active adapters with gateways");
+        None
+    };
+
+    // Fallback sequence
+    let nameserver = nameserver.or_else(|| {
+        active_adapters.iter()
+            .flat_map(|a| a.dns_servers())
+            .next()
+            .map(|d| {
+                crate::verbose!("[dog] Using first DNS from active adapter: {}", d);
+                d.to_string()
+            })
+    }).or_else(|| {
+        adapters.iter()
+            .filter(|a| a.oper_status() == ipconfig::OperStatus::IfOperStatusUp)
+            .flat_map(|a| a.dns_servers())
+            .next()
+            .map(|d| {
+                crate::verbose!("[dog] Using first DNS from any online adapter: {}", d);
+                d.to_string()
+            })
     });
 
-    if let Some(dns_server) = active_adapters
-        .clone()
-        .find(|a| ip.map(|ip| a.ip_addresses().contains(&ip)).unwrap_or(false))
-        .map(|a| a.dns_servers().first())
-        .flatten()
-    {
-        debug!("Found first nameserver {:?}", dns_server);
-        let nameserver = dns_server.to_string();
-        Ok(Resolver { nameserver, search_list })
+    if let Some(ns) = nameserver {
+        crate::verbose!("[dog] Resolved nameserver: {}", ns);
+        return Ok(Resolver { nameserver: ns, search_list });
     }
 
-    // Fallback
-    else if let Some(dns_server) = active_adapters
-        .flat_map(|a| a.dns_servers())
-        .find(|d| (d.is_ipv4() && force_ip_family != ForceIPFamily::V6) || d.is_ipv6())
-    {
-        debug!("Found first fallback nameserver {:?}", dns_server);
-        let nameserver = dns_server.to_string();
-        Ok(Resolver { nameserver, search_list })
-    }
-
-    else {
-        Err(ResolverLookupError::NoNameserver)
-    }
+    crate::verbose!("[dog] No system DNS found, falling back to 1.1.1.1");
+    Ok(Resolver { nameserver: String::from("1.1.1.1"), search_list })
 }
 
 
@@ -228,7 +260,7 @@ pub enum ResolverLookupError {
     #[cfg(windows)]
     Windows(ipconfig::error::Error),
 
-    /// dog is running on a platform where it doesn’t know how to get the
+    /// dog is running on a platform where it doesn't know how to get the
     /// network configuration, so the user must supply one instead.
     #[cfg(all(not(unix), not(windows)))]
     UnsupportedPlatform,

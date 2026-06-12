@@ -27,6 +27,9 @@ pub struct Options {
 
     /// How to format the output data.
     pub format: OutputFormat,
+
+    /// Whether to print verbose diagnostic output.
+    pub verbose: bool,
 }
 
 impl Options {
@@ -73,6 +76,7 @@ impl Options {
         // Meta options
         opts.optflag ("v", "version",      "Print version information");
         opts.optflag ("?", "help",         "Print list of command-line options");
+        opts.optflag ("",  "verbose",      "Print verbose diagnostic output");
 
         let matches = match opts.parse(args) {
             Ok(m)  => m,
@@ -107,9 +111,10 @@ impl Options {
     fn deduce(matches: getopts::Matches) -> Result<Self, OptionsError> {
         let measure_time = matches.opt_present("time");
         let format = OutputFormat::deduce(&matches);
+        let verbose = matches.opt_present("verbose");
         let requests = RequestGenerator::deduce(matches)?;
 
-        Ok(Self { requests, measure_time, format })
+        Ok(Self { requests, measure_time, format, verbose })
     }
 }
 

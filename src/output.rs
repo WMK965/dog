@@ -11,6 +11,7 @@ use json::{object, JsonValue};
 
 use crate::colours::Colours;
 use crate::table::{Table, Section};
+use is_terminal::IsTerminal;
 
 
 /// How to format the output data.
@@ -56,7 +57,7 @@ impl UseColours {
     /// overridden the colour setting, and if not, whether output is to a
     /// terminal.
     pub fn should_use_colours(self) -> bool {
-        self == Self::Always || (atty::is(atty::Stream::Stdout) && env::var("NO_COLOR").is_err() && self != Self::Never)
+        self == Self::Always || (std::io::stdout().is_terminal() && env::var("NO_COLOR").is_err() && self != Self::Never)
     }
 
     /// Creates a palette of colours depending on the user’s wishes or whether
@@ -648,11 +649,10 @@ fn erroneous_phase(error: &TransportError) -> &'static str {
         TransportError::WireError(_)          => "protocol",
         TransportError::TruncatedResponse     |
         TransportError::NetworkError(_)       => "network",
-        #[cfg(feature = "with_nativetls")]
-        TransportError::TlsError(_)           |
-        TransportError::TlsHandshakeError(_)  => "tls",
         #[cfg(feature = "with_rustls")]
-        TransportError::RustlsInvalidDnsNameError(_) => "tls", // TODO: Actually wrong, could be https
+        TransportError::TlsError(_)           => "tls",
+        #[cfg(feature = "with_rustls")]
+        TransportError::RustlsInvalidDnsNameError(_) => "tls",
         #[cfg(feature = "with_https")]
         TransportError::HttpError(_)          |
         TransportError::WrongHttpStatus(_,_)  => "http",
@@ -665,10 +665,8 @@ fn error_message(error: TransportError) -> String {
         TransportError::WireError(e)          => wire_error_message(e),
         TransportError::TruncatedResponse     => "Truncated response".into(),
         TransportError::NetworkError(e)       => e.to_string(),
-        #[cfg(feature = "with_nativetls")]
+        #[cfg(feature = "with_rustls")]
         TransportError::TlsError(e)           => e.to_string(),
-        #[cfg(feature = "with_nativetls")]
-        TransportError::TlsHandshakeError(e)  => e.to_string(),
         #[cfg(any(feature = "with_rustls"))]
         TransportError::RustlsInvalidDnsNameError(e) => e.to_string(),
         #[cfg(feature = "with_https")]

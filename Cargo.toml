@@ -46,7 +46,7 @@ dns-transport = { path = "./dns-transport" }
 
 # command-line
 ansi_term = "0.12"
-atty = "0.2"
+is-terminal = "0.4"
 getopts = "0.2"
 
 # transaction ID generation
@@ -60,21 +60,19 @@ log = "0.4"
 
 # windows default nameserver determination
 [target.'cfg(windows)'.dependencies]
-ipconfig = { version = "0.2" }
+ipconfig = { version = "0.3" }
 
 [build-dependencies]
-datetime = { version = "0.5.1", default_features = false }
+datetime = { version = "0.5.2", default-features = false }
 
 [dev-dependencies]
-pretty_assertions = "0.7"
+pretty_assertions = "1"
 
 [features]
-default = ["with_idna", "with_tls", "with_https", "with_nativetls"]
+default = ["with_idna", "with_tls", "with_https", "with_rustls"]
 with_idna = ["dns/with_idna"]
 
 with_tls = ["dns-transport/with_tls"]
 with_https = ["dns-transport/with_https"]
 
-with_nativetls = ["dns-transport/with_nativetls"]
-with_nativetls_vendored = ["with_nativetls", "dns-transport/with_nativetls", "dns-transport/with_nativetls_vendored"]
 with_rustls = ["dns-transport/with_rustls"]

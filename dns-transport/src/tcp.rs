@@ -31,7 +31,7 @@ impl TcpTransport {
 
 impl Transport for TcpTransport {
     fn send(&self, request: &Request) -> Result<Response, Error> {
-        info!("Opening TCP stream");
+        info!("TCP connecting to {}:53", self.addr);
         let mut stream =
             if self.addr.contains(':') {
                 TcpStream::connect(&*self.addr)?
@@ -39,7 +39,7 @@ impl Transport for TcpTransport {
             else {
                 TcpStream::connect((&*self.addr, 53))?
             };
-        debug!("Opened");
+        debug!("TCP connected");
 
         // The message is prepended with the length when sent over TCP,
         // so the server knows how long it is (RFC 1035 §4.2.2)
