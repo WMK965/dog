@@ -3,6 +3,29 @@
 
 [dog](https://dns.lookup.dog/) is a command-line DNS client.
 
+---
+
+> **Maintained by 965 and [DeepSeek V4 Pro](https://api-docs.deepseek.com/zh-cn/news/news260424)**
+
+---
+
+## Fork Changes / 分支变更
+
+This fork includes the following improvements over the upstream [ogham/dog](https://github.com/ogham/dog):
+
+本分支相比上游 [ogham/dog](https://github.com/ogham/dog) 包含以下改进：
+
+| Change / 变更 | Description / 说明 |
+|---|---|
+| **TLS: OpenSSL → rustls 0.23** | Removed `native-tls` / OpenSSL dependency. Replaced with pure-Rust `rustls 0.23`, eliminating the need for external OpenSSL libraries. / 移除 `native-tls` / OpenSSL 依赖，替换为纯 Rust 的 `rustls 0.23`，无需外部 OpenSSL 库。 |
+| **Windows DNS resolution fix / Windows DNS 解析修复** | Fixed `os error 11001` (WSAHOST_NOT_FOUND) on Windows. Upgraded `ipconfig` 0.2→0.3, rewrote adapter discovery with three-tier fallback, and added bracketless IPv6 address parsing. / 修复 Windows 上 `os error 11001` 错误。升级 `ipconfig` 0.2→0.3，重写适配器发现逻辑（三层回退），并添加无括号 IPv6 地址解析。 |
+| **IPv6 transport support / IPv6 传输支持** | UDP transport now binds the correct socket family (IPv4/IPv6) based on the target address, fixing `WSAEAFNOSUPPORT` errors. Added `resolve_socket_addr()` for robust address parsing. / UDP 传输层根据目标地址族绑定正确的套接字类型，修复 `WSAEAFNOSUPPORT` 错误。添加 `resolve_socket_addr()` 进行鲁棒地址解析。 |
+| **`--verbose` flag / `--verbose` 标志** | Added `--verbose` diagnostic mode showing adapter discovery, nameserver selection, and request/response details. Gate-controlled via `verbose!()` macro; no output in normal mode. / 添加 `--verbose` 诊断模式，显示网卡发现、DNS 服务器选择、请求/响应详情。通过 `verbose!()` 宏门控，正常模式无输出。 |
+| **Chinese localization / 中文支持** | Auto-detects system language on Windows (`GetUserDefaultUILanguage`) and Unix (`LANG`). 23+ translated messages (status codes, wire errors, resolver errors, help text). Fallback to English when locale is not Chinese. / 自动检测系统语言（Windows: `GetUserDefaultUILanguage`，Unix: `LANG`）。翻译 23+ 条消息（状态码、数据包错误、解析器错误、帮助文本）。非中文环境下回退到英文。 |
+| **Dependency updates / 依赖更新** | Upgraded: `base64` 0.13→0.22, `unic-idna`→`idna` 1.1, `atty`→`is-terminal` 0.4, `byteorder` 1.3→1.5, `ipconfig` 0.2→0.3, `pretty_assertions` 0.7→1, `rustls` 0.19→0.23, `webpki-roots` 0.21→0.26. / 升级多个过时依赖。 |
+
+---
+
 <a href="https://travis-ci.org/github/ogham/dog">
     <img src="https://travis-ci.org/ogham/dog.svg?branch=master" alt="Build status" />
 </a>
