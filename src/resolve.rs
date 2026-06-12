@@ -83,47 +83,123 @@ impl Resolver {
 
 /// Looks up the system default nameserver on Unix, by querying
 /// `/etc/resolv.conf` and using the first line that specifies one.
-/// Returns an error if there's a problem reading the file, or `None` if no
-/// nameserver is specified in the file.
+/// Falls back to `resolvectl` (systemd-resolved) if no nameserver is found,
+/// and finally to `1.1.1.1` as a last resort.
 #[cfg(unix)]
 fn system_nameservers() -> Result<Resolver, ResolverLookupError> {
     use std::fs::File;
     use std::io::{BufRead, BufReader};
+    use std::net::IpAddr;
 
     if cfg!(test) {
         panic!("system_nameservers() called from test code");
     }
 
+    let search_list = Vec::new();
+
+    // ── Step 1: /etc/resolv.conf ──────────────────────────────────
+
+    crate::verbose!("[dog] Looking up system DNS servers from /etc/resolv.conf...");
+
+    let nameserver = read_resolv_conf().ok().and_then(|(ns, _sl)| {
+        crate::verbose!("[dog]   Found nameserver in /etc/resolv.conf: {}", ns);
+        Some(ns)
+    });
+
+    // ── Step 2: systemd-resolved (resolvectl) ─────────────────────
+
+    let nameserver = nameserver.or_else(|| {
+        crate::verbose!("[dog] Trying resolvectl (systemd-resolved)...");
+        resolvectl_dns().map(|ns| {
+            crate::verbose!("[dog]   Found nameserver via resolvectl: {}", ns);
+            ns
+        })
+    });
+
+    // ── Step 3: Last resort ───────────────────────────────────────
+
+    if let Some(ns) = nameserver {
+        crate::verbose!("[dog] Resolved nameserver: {}", ns);
+        Ok(Resolver { nameserver: ns, search_list })
+    } else {
+        crate::verbose!("[dog] No system DNS found, falling back to 1.1.1.1");
+        Ok(Resolver { nameserver: String::from("1.1.1.1"), search_list })
+    }
+}
+
+/// Reads the first nameserver from `/etc/resolv.conf`.
+#[cfg(unix)]
+fn read_resolv_conf() -> io::Result<(String, Vec<String>)> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    use std::net::IpAddr;
+
     let f = File::open("/etc/resolv.conf")?;
     let reader = BufReader::new(f);
 
-    let mut nameservers = Vec::new();
     let mut search_list = Vec::new();
     for line in reader.lines() {
         let line = line?;
-
-        if let Some(nameserver_str) = line.strip_prefix("nameserver ") {
-            let ip: Result<std::net::Ipv4Addr, _> = nameserver_str.parse();
-            // TODO: This will need to be changed for IPv6 support.
-
-            match ip {
-                Ok(_ip) => nameservers.push(nameserver_str.into()),
-                Err(e)  => warn!("Failed to parse nameserver line {:?}: {}", line, e),
+        if let Some(ns) = line.strip_prefix("nameserver ") {
+            if let Ok(addr) = ns.parse::<IpAddr>() {
+                return Ok((addr.to_string(), search_list));
             }
         }
-
         if let Some(search_str) = line.strip_prefix("search ") {
             search_list.clear();
             search_list.extend(search_str.split_ascii_whitespace().map(|s| s.into()));
         }
     }
 
-    if let Some(nameserver) = nameservers.into_iter().next() {
-        Ok(Resolver { nameserver, search_list })
+    Err(io::Error::new(io::ErrorKind::NotFound, "No nameserver in /etc/resolv.conf"))
+}
+
+/// Queries systemd-resolved for DNS servers via `resolvectl dns`.
+#[cfg(unix)]
+fn resolvectl_dns() -> Option<String> {
+    use std::process::Command;
+    use std::net::IpAddr;
+
+    let output = Command::new("resolvectl")
+        .args(["dns"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
     }
-    else {
-        Err(ResolverLookupError::NoNameserver)
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse lines like:
+    //   Global: 192.168.1.1
+    //   Link 2 (eth0): 192.168.1.1 fe80::1
+    for line in stdout.lines() {
+        if let Some(colon_pos) = line.find(':') {
+            let after = line[colon_pos + 1..].trim();
+            // The "Global:" entry is the most authoritative
+            if line.starts_with("Global:") && !after.is_empty() {
+                // Take the first IP from the space-separated list
+                return after.split_whitespace()
+                    .find_map(|s| s.parse::<IpAddr>().ok())
+                    .map(|a| a.to_string());
+            }
+        }
     }
+
+    // Fallback: take first DNS from any link
+    for line in stdout.lines() {
+        if let Some(colon_pos) = line.find(':') {
+            let after = line[colon_pos + 1..].trim();
+            if !after.is_empty() {
+                return after.split_whitespace()
+                    .find_map(|s| s.parse::<IpAddr>().ok())
+                    .map(|a| a.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 
