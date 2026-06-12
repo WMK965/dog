@@ -1,17 +1,14 @@
 //! This build script gets run during every build. Its purpose is to put
-//! together the files used for the `--help` and `--version`, which need to
-//! come in both coloured and non-coloured variants. The main usage text is
-//! contained in `src/usage.txt`; to make it easier to edit, backslashes (\)
-//! are used instead of the beginning of ANSI escape codes.
+//! together the files used for the `--version` display, which need to
+//! come in both coloured and non-coloured variants.
 //!
 //! The version string is quite complex: we want to show the version,
 //! current Git hash, and compilation date when building *debug*
 //! versions, but just the version for *release* versions.
 //!
 //! This script generates the string from the environment variables
-//! that Cargo adds (http://doc.crates.io/environment-variables.html)
-//! and runs `git` to get the SHA1 hash. It then writes the strings
-//! into files, which we can include during compilation.
+//! that Cargo adds and runs `git` to get the SHA1 hash. It then writes
+//! the strings into files, which we can include during compilation.
 
 use std::env;
 use std::fs::File;
@@ -25,19 +22,17 @@ use datetime::{LocalDateTime, ISO};
 fn main() -> io::Result<()> {
     #![allow(clippy::write_with_newline)]
 
-    let usage   = include_str!("src/usage.txt");
     let tagline = "dog \\1;32m●\\0m command-line DNS client";
-    let url     = "https://dns.lookup.dog/";
 
     let ver =
         if is_debug_build() {
-            format!("{}\nv{} \\1;31m(pre-release debug build!)\\0m\n\\1;4;34m{}\\0m", tagline, version_string(), url)
+            format!("{}\nv{} \\1;31m(pre-release debug build!)\\0m", tagline, version_string())
         }
         else if is_development_version() {
-            format!("{}\nv{} [{}] built on {} \\1;31m(pre-release!)\\0m\n\\1;4;34m{}\\0m", tagline, version_string(), git_hash(), build_date(), url)
+            format!("{}\nv{} [{}] built on {} \\1;31m(pre-release!)\\0m", tagline, version_string(), git_hash(), build_date())
         }
         else {
-            format!("{}\nv{}\n\\1;4;34m{}\\0m", tagline, version_string(), url)
+            format!("{}\nv{}", tagline, version_string())
         };
 
     // We need to create these files in the Cargo output directory.
@@ -50,18 +45,6 @@ fn main() -> io::Result<()> {
     // Bland version text
     let mut f = File::create(&out.join("version.bland.txt"))?;
     writeln!(f, "{}", strip_codes(&ver))?;
-
-    // Pretty usage text
-    let mut f = File::create(&out.join("usage.pretty.txt"))?;
-    writeln!(f, "{}", convert_codes(&tagline))?;
-    writeln!(f)?;
-    write!(f, "{}", convert_codes(&usage))?;
-
-    // Bland usage text
-    let mut f = File::create(&out.join("usage.bland.txt"))?;
-    writeln!(f, "{}", strip_codes(&tagline))?;
-    writeln!(f)?;
-    write!(f, "{}", strip_codes(&usage))?;
 
     Ok(())
 }

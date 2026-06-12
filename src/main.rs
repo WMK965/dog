@@ -27,6 +27,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static VERBOSE: AtomicBool = AtomicBool::new(false);
 
+/// Prints a message to stderr if verbose mode is enabled.
+///
+/// # Examples
+///
+/// ```ignore
+/// verbose!("[dog] Looking up system DNS servers...");
+/// ```
 #[macro_export]
 macro_rules! verbose {
     ($($arg:tt)*) => {
@@ -39,6 +46,7 @@ macro_rules! verbose {
 mod colours;
 mod connect;
 mod hints;
+mod localize;
 mod logger;
 mod output;
 mod requests;
@@ -57,6 +65,7 @@ fn main() {
     use std::process::exit;
 
     logger::configure(env::var_os("DOG_DEBUG"));
+    localize::detect();
 
     #[cfg(windows)]
     if let Err(e) = ansi_term::enable_ansi_support() {
@@ -74,12 +83,7 @@ fn main() {
         }
 
         OptionsResult::Help(help_reason, use_colours) => {
-            if use_colours.should_use_colours() {
-                print!("{}", include_str!(concat!(env!("OUT_DIR"), "/usage.pretty.txt")));
-            }
-            else {
-                print!("{}", include_str!(concat!(env!("OUT_DIR"), "/usage.bland.txt")));
-            }
+            print!("{}", localize::get_usage_text(use_colours.should_use_colours()));
 
             if help_reason == HelpReason::NoDomains {
                 exit(exits::OPTIONS_ERROR);
@@ -101,12 +105,12 @@ fn main() {
         }
 
         OptionsResult::InvalidOptionsFormat(oe) => {
-            eprintln!("dog: Invalid options: {}", oe);
+            eprintln!("{}{}", localize::invalid_options_prefix(), oe);
             exit(exits::OPTIONS_ERROR);
         }
 
         OptionsResult::InvalidOptions(why) => {
-            eprintln!("dog: Invalid options: {}", why);
+            eprintln!("{}{}", localize::invalid_options_prefix(), why);
             exit(exits::OPTIONS_ERROR);
         }
     }
@@ -134,7 +138,7 @@ fn run(Options { requests, format, measure_time, .. }: Options) -> i32 {
 
     for hostname_in_query in &requests.inputs.domains {
         if local_host_hints.contains(hostname_in_query) {
-            eprintln!("warning: domain '{}' also exists in hosts file", hostname_in_query);
+            eprintln!("{}", localize::domain_in_hosts(hostname_in_query));
         }
     }
 
@@ -153,7 +157,7 @@ fn run(Options { requests, format, measure_time, .. }: Options) -> i32 {
             rt
         }
         Err(e) => {
-            eprintln!("[dog] Unable to obtain resolver: {}", e);
+            eprintln!("{}", localize::unable_obtain_resolver(&e));
             return exits::SYSTEM_ERROR;
         }
     };
@@ -216,13 +220,13 @@ fn disabled_feature_check(options: &Options) {
 
     #[cfg(not(feature = "with_tls"))]
     if options.requests.inputs.transport_types.contains(&TransportType::TLS) {
-        eprintln!("dog: Cannot use '--tls': This version of dog has been compiled without TLS support");
+        eprintln!("{}", localize::tls_disabled());
         exit(exits::OPTIONS_ERROR);
     }
 
     #[cfg(not(feature = "with_https"))]
     if options.requests.inputs.transport_types.contains(&TransportType::HTTPS) {
-        eprintln!("dog: Cannot use '--https': This version of dog has been compiled without HTTPS support");
+        eprintln!("{}", localize::https_disabled());
         exit(exits::OPTIONS_ERROR);
     }
 }

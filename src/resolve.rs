@@ -250,6 +250,7 @@ pub enum ResolverLookupError {
 
     /// The system information was successfully read, but there was no adapter
     /// suitable to use.
+    #[allow(dead_code)]
     NoNameserver,
 
     /// There was an error accessing the network configuration.
@@ -283,18 +284,18 @@ impl fmt::Display for ResolverLookupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoNameserver => {
-                write!(f, "No nameserver found")
+                write!(f, "{}", crate::localize::no_nameserver_found())
             }
             Self::IO(ioe) => {
-                write!(f, "Error reading network configuration: {}", ioe)
+                write!(f, "{}", crate::localize::error_reading_network_config(ioe))
             }
             #[cfg(windows)]
             Self::Windows(ipe) => {
-                write!(f, "Error reading network configuration: {}", ipe)
+                write!(f, "{}", crate::localize::error_reading_network_config(ipe))
             }
             #[cfg(all(not(unix), not(windows)))]
             Self::UnsupportedPlatform => {
-                write!(f, "dog cannot automatically detect nameservers on this platform; you will have to provide one explicitly")
+                write!(f, "{}", crate::localize::unsupported_platform())
             }
         }
     }

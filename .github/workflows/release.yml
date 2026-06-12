@@ -1,0 +1,195 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Release type"
+        required: true
+        type: choice
+        options:
+          - prerelease
+          - release
+        default: prerelease
+      version:
+        description: "Formal release version, e.g. 1.0.0 or v1.0.0 (only used when release_type=release)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: dog
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows x64
+            archive_name: dog-windows-x86_64.zip
+            built_binary: dog.exe
+            packaged_binary: dog.exe
+
+          - os: ubuntu-24.04
+            label: Linux x64
+            archive_name: dog-linux-x86_64.tar.gz
+            built_binary: dog
+            packaged_binary: dog
+
+          - os: ubuntu-24.04-arm
+            label: Linux arm64
+            archive_name: dog-linux-aarch64.tar.gz
+            built_binary: dog
+            packaged_binary: dog
+
+          - os: macos-15-intel
+            label: macOS x64
+            archive_name: dog-macos-x86_64.tar.gz
+            built_binary: dog
+            packaged_binary: dog
+
+          - os: macos-15
+            label: macOS arm64
+            archive_name: dog-macos-aarch64.tar.gz
+            built_binary: dog
+            packaged_binary: dog
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package artifact (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp "target/release/${{ matrix.built_binary }}" "dist/${{ matrix.packaged_binary }}"
+          cp LICENCE dist/
+          cp README.md dist/
+          tar -czf "${{ matrix.archive_name }}" -C dist .
+
+      - name: Package artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item "target/release/${{ matrix.built_binary }}" "dist/${{ matrix.packaged_binary }}"
+          Copy-Item LICENCE dist/
+          Copy-Item README.md dist/
+          Compress-Archive -Path dist/* -DestinationPath "${{ matrix.archive_name }}" -Force
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Resolve version metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE_TYPE="${{ inputs.release_type }}"
+          INPUT_VERSION="${{ inputs.version }}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+
+          if [[ "$RELEASE_TYPE" == "release" ]]; then
+            if [[ -z "$INPUT_VERSION" ]]; then
+              echo "version is required when release_type=release"
+              exit 1
+            fi
+
+            if [[ "$INPUT_VERSION" == v* ]]; then
+              TAG="$INPUT_VERSION"
+              VERSION="${INPUT_VERSION#v}"
+            else
+              TAG="v$INPUT_VERSION"
+              VERSION="$INPUT_VERSION"
+            fi
+
+            TITLE="dog $TAG"
+            IS_PRERELEASE="false"
+          else
+            VERSION="$SHORT_SHA"
+            TAG="pre-$SHORT_SHA"
+            TITLE="dog pre-release $SHORT_SHA"
+            IS_PRERELEASE="true"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate SHA256SUMS.txt
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum \
+            dog-windows-x86_64.zip \
+            dog-linux-x86_64.tar.gz \
+            dog-linux-aarch64.tar.gz \
+            dog-macos-x86_64.tar.gz \
+            dog-macos-aarch64.tar.gz \
+            > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXTRA_ARGS=()
+          if [[ "${{ steps.meta.outputs.is_prerelease }}" == "true" ]]; then
+            EXTRA_ARGS+=(--prerelease)
+          fi
+
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            release-assets/dog-windows-x86_64.zip \
+            release-assets/dog-linux-x86_64.tar.gz \
+            release-assets/dog-linux-aarch64.tar.gz \
+            release-assets/dog-macos-x86_64.tar.gz \
+            release-assets/dog-macos-aarch64.tar.gz \
+            release-assets/SHA256SUMS.txt \
+            --repo "${{ github.repository }}" \
+            --title "${{ steps.meta.outputs.title }}" \
+            --target "${{ github.sha }}" \
+            --generate-notes \
+            "${EXTRA_ARGS[@]}"

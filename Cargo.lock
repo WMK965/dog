@@ -75,7 +75,7 @@ dependencies = [
 
 [[package]]
 name = "dns"
-version = "0.2.0-pre"
+version = "0.2.0"
 dependencies = [
  "base64",
  "byteorder",
@@ -87,7 +87,7 @@ dependencies = [
 
 [[package]]
 name = "dns-transport"
-version = "0.2.0-pre"
+version = "0.2.0"
 dependencies = [
  "cfg-if",
  "dns",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "dog"
-version = "0.2.0-pre"
+version = "0.2.0"
 dependencies = [
  "ansi_term",
  "datetime",

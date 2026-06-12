@@ -10,6 +10,7 @@ use dns_transport::Error as TransportError;
 use json::{object, JsonValue};
 
 use crate::colours::Colours;
+use crate::localize;
 use crate::table::{Table, Section};
 use is_terminal::IsTerminal;
 
@@ -85,7 +86,7 @@ impl OutputFormat {
                 let all_answers = responses.into_iter().flat_map(|r| r.answers).collect::<Vec<_>>();
 
                 if all_answers.is_empty() {
-                    eprintln!("No results");
+                    eprintln!("{}", localize::no_results());
                     return false;
                 }
 
@@ -631,14 +632,14 @@ impl fmt::Display for Ascii<'_> {
 /// an error.
 pub fn print_error_code(rcode: ErrorCode) {
     match rcode {
-        ErrorCode::FormatError     => println!("Status: Format Error"),
-        ErrorCode::ServerFailure   => println!("Status: Server Failure"),
-        ErrorCode::NXDomain        => println!("Status: NXDomain"),
-        ErrorCode::NotImplemented  => println!("Status: Not Implemented"),
-        ErrorCode::QueryRefused    => println!("Status: Query Refused"),
-        ErrorCode::BadVersion      => println!("Status: Bad Version"),
-        ErrorCode::Private(num)    => println!("Status: Private Reason ({})", num),
-        ErrorCode::Other(num)      => println!("Status: Other Failure ({})", num),
+        ErrorCode::FormatError     => println!("{}", localize::status_format_error()),
+        ErrorCode::ServerFailure   => println!("{}", localize::status_server_failure()),
+        ErrorCode::NXDomain        => println!("{}", localize::status_nxdomain()),
+        ErrorCode::NotImplemented  => println!("{}", localize::status_not_implemented()),
+        ErrorCode::QueryRefused    => println!("{}", localize::status_query_refused()),
+        ErrorCode::BadVersion      => println!("{}", localize::status_bad_version()),
+        ErrorCode::Private(num)    => println!("{}", localize::status_private_reason(num)),
+        ErrorCode::Other(num)      => println!("{}", localize::status_other_failure(num)),
     }
 }
 
@@ -646,16 +647,16 @@ pub fn print_error_code(rcode: ErrorCode) {
 /// to the user so they can debug what went wrong.
 fn erroneous_phase(error: &TransportError) -> &'static str {
     match error {
-        TransportError::WireError(_)          => "protocol",
+        TransportError::WireError(_)          => localize::phase_protocol(),
         TransportError::TruncatedResponse     |
-        TransportError::NetworkError(_)       => "network",
+        TransportError::NetworkError(_)       => localize::phase_network(),
         #[cfg(feature = "with_rustls")]
-        TransportError::TlsError(_)           => "tls",
+        TransportError::TlsError(_)           => localize::phase_tls(),
         #[cfg(feature = "with_rustls")]
-        TransportError::RustlsInvalidDnsNameError(_) => "tls",
+        TransportError::RustlsInvalidDnsNameError(_) => localize::phase_tls(),
         #[cfg(feature = "with_https")]
         TransportError::HttpError(_)          |
-        TransportError::WrongHttpStatus(_,_)  => "http",
+        TransportError::WrongHttpStatus(_,_)  => localize::phase_http(),
     }
 }
 
@@ -663,7 +664,7 @@ fn erroneous_phase(error: &TransportError) -> &'static str {
 fn error_message(error: TransportError) -> String {
     match error {
         TransportError::WireError(e)          => wire_error_message(e),
-        TransportError::TruncatedResponse     => "Truncated response".into(),
+        TransportError::TruncatedResponse     => localize::truncated_response().into(),
         TransportError::NetworkError(e)       => e.to_string(),
         #[cfg(feature = "with_rustls")]
         TransportError::TlsError(e)           => e.to_string(),
@@ -672,7 +673,7 @@ fn error_message(error: TransportError) -> String {
         #[cfg(feature = "with_https")]
         TransportError::HttpError(e)          => e.to_string(),
         #[cfg(feature = "with_https")]
-        TransportError::WrongHttpStatus(t,r)  => format!("Nameserver returned HTTP {} ({})", t, r.unwrap_or_else(|| "No reason".into()))
+        TransportError::WrongHttpStatus(t,r)  => localize::nameserver_http_status(t, &r)
     }
 }
 
@@ -681,25 +682,25 @@ fn error_message(error: TransportError) -> String {
 fn wire_error_message(error: WireError) -> String {
     match error {
         WireError::IO => {
-            "Malformed packet: insufficient data".into()
+            localize::malformed_packet_insufficient().into()
         }
         WireError::WrongRecordLength { stated_length, mandated_length: MandatedLength::Exactly(len) } => {
-            format!("Malformed packet: record length should be {}, got {}", len, stated_length )
+            localize::malformed_packet_record_length(stated_length, len)
         }
         WireError::WrongRecordLength { stated_length, mandated_length: MandatedLength::AtLeast(len) } => {
-            format!("Malformed packet: record length should be at least {}, got {}", len, stated_length )
+            localize::malformed_packet_record_length_at_least(stated_length, len)
         }
         WireError::WrongLabelLength { stated_length, length_after_labels } => {
-            format!("Malformed packet: length {} was specified, but read {} bytes", stated_length, length_after_labels)
+            localize::malformed_packet_label_length(stated_length, length_after_labels)
         }
         WireError::TooMuchRecursion(indices) => {
-            format!("Malformed packet: too much recursion: {:?}", indices)
+            localize::malformed_packet_too_much_recursion(&format!("{:?}", indices))
         }
         WireError::OutOfBounds(index) => {
-            format!("Malformed packet: out of bounds ({})", index)
+            localize::malformed_packet_out_of_bounds(index)
         }
         WireError::WrongVersion { stated_version, maximum_supported_version } => {
-            format!("Malformed packet: record specifies version {}, expected up to {}", stated_version, maximum_supported_version)
+            localize::malformed_packet_wrong_version(stated_version, maximum_supported_version)
         }
     }
 }

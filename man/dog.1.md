@@ -128,6 +128,10 @@ META OPTIONS
 `--version`
 : Displays the version of dog being invoked.
 
+`--verbose`
+: Prints verbose diagnostic output during operation, including network adapter
+  discovery, nameserver selection, and request/response details.
+
 
 ENVIRONMENT VARIABLES
 =====================
@@ -241,5 +245,4 @@ AUTHOR
 
 dog is maintained by Benjamin ‘ogham’ Sago.
 
-**Website:** `https://dns.lookup.dog/` \
 **Source code:** `https://github.com/ogham/dog`

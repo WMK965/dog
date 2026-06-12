@@ -1,6 +1,7 @@
 # Meta options
 complete -c dog -s 'v' -l 'version' -d "Show version of dog"
 complete -c dog -s '?' -l 'help'    -d "Show list of command-line options"
+complete -c dog        -l 'verbose' -d "Print verbose diagnostic output"
 
 # Query options
 complete -c dog -x -a "(__fish_print_hostnames) A AAAA CAA CNAME HINFO MX NS PTR SOA SRV TXT IN CH HS"

@@ -77,7 +77,8 @@ Register-ArgumentCompleter -Native -CommandName 'dog' -ScriptBlock {
             '--seconds',
             '--time',
             '-?', '--help',
-            '-v', '--version'
+            '-v', '--version',
+            '--verbose'
         ) | Sort-Object
 
         $completions += $allOptions
