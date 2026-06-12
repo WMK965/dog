@@ -18,7 +18,6 @@ fn is_chinese() -> bool {
     IS_CHINESE.load(Ordering::Relaxed)
 }
 
-#[cfg(windows)]
 #[allow(unsafe_code)]
 fn detect_chinese_locale() -> bool {
     #[cfg(windows)]
